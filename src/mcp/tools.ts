@@ -4,14 +4,16 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Database } from '../core/database.js';
-import type { EmbeddingsClient } from '../core/embeddings.js';
+import { EmbeddingsClient } from '../core/embeddings.js';
 import { search } from '../core/search.js';
 import { Indexer } from '../core/indexer.js';
+import { type SiftConfig, addFolder, expandPath } from '../core/config.js';
 
 export function registerTools(
   server: McpServer,
   db: Database,
-  embeddings: EmbeddingsClient
+  embeddings: EmbeddingsClient,
+  config: SiftConfig
 ): void {
   // sift_search - Semantic search across indexed documents
   server.tool(
@@ -112,13 +114,18 @@ export function registerTools(
       recursive: z.boolean().optional().default(true).describe('Include subfolders'),
     },
     async ({ folder, recursive }) => {
-      const indexer = new Indexer();
+      const indexer = new Indexer({
+        maxTokens: config.chunking.maxTokens,
+        overlap: config.chunking.overlap,
+      });
+
+      const expandedFolder = expandPath(folder);
 
       try {
-        const chunks = await indexer.indexFolder(folder, recursive);
+        const chunks = await indexer.indexFolder(expandedFolder, recursive);
 
         // Embed and store each chunk
-        let filesIndexed = new Set<string>();
+        const filesIndexed = new Set<string>();
         let chunksCreated = 0;
         const errors: string[] = [];
 
@@ -138,15 +145,21 @@ export function registerTools(
           }
         }
 
+        // Save folder to config for future reference
+        if (filesIndexed.size > 0) {
+          await addFolder(expandedFolder);
+        }
+
         return {
           content: [
             {
               type: 'text',
               text: JSON.stringify(
                 {
+                  folder: expandedFolder,
                   files_indexed: filesIndexed.size,
                   chunks_created: chunksCreated,
-                  errors,
+                  errors: errors.length > 0 ? errors : undefined,
                 },
                 null,
                 2
@@ -176,9 +189,8 @@ export function registerTools(
     async () => {
       const stats = await db.getStats();
       const files = await db.listFiles();
-      const folders = [...new Set(files.map((f) => f.path.split('/').slice(0, -1).join('/')))];
 
-      const hasOllama = await EmbeddingsClient.detectOllama();
+      const hasOllama = await EmbeddingsClient.detectOllama(config.embeddings.baseUrl);
 
       return {
         content: [
@@ -186,10 +198,16 @@ export function registerTools(
             type: 'text',
             text: JSON.stringify(
               {
-                indexed_folders: folders,
+                configured_folders: config.folders,
                 total_files: stats.totalFiles,
                 total_chunks: stats.totalChunks,
-                embedding_provider: hasOllama ? 'ollama' : 'api',
+                embeddings: {
+                  provider: config.embeddings.provider,
+                  model: config.embeddings.model,
+                  dimension: config.embeddings.dimension,
+                  ollama_available: hasOllama,
+                },
+                chunking: config.chunking,
                 last_indexed: files.length > 0
                   ? files.reduce((latest, f) =>
                       f.indexedAt > latest ? f.indexedAt : latest, files[0].indexedAt)

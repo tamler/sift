@@ -5,3 +5,4 @@ export { Indexer } from './indexer.js';
 export { EmbeddingsClient } from './embeddings.js';
 export { Database } from './database.js';
 export { search } from './search.js';
+export * from './config.js';
