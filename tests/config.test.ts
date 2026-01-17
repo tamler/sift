@@ -86,4 +86,81 @@ describe('Config', () => {
       expect(config.chunking.overlap).toBe(50);
     });
   });
+
+  describe('Config validation', () => {
+    it('should reject invalid provider', async () => {
+      const invalidConfig = {
+        folders: [],
+        embeddings: {
+          provider: 'invalid' as any,
+          model: 'test',
+          baseUrl: 'http://localhost:11434',
+        },
+        chunking: { maxTokens: 500, overlap: 50 },
+        database: '~/.sift/sift.db',
+      };
+
+      await expect(saveConfig(invalidConfig)).rejects.toThrow('Invalid embedding provider');
+    });
+
+    it('should reject empty model', async () => {
+      const invalidConfig = {
+        folders: [],
+        embeddings: {
+          provider: 'ollama' as const,
+          model: '',
+          baseUrl: 'http://localhost:11434',
+        },
+        chunking: { maxTokens: 500, overlap: 50 },
+        database: '~/.sift/sift.db',
+      };
+
+      await expect(saveConfig(invalidConfig)).rejects.toThrow('non-empty string');
+    });
+
+    it('should reject invalid baseUrl', async () => {
+      const invalidConfig = {
+        folders: [],
+        embeddings: {
+          provider: 'ollama' as const,
+          model: 'test',
+          baseUrl: 'not-a-url',
+        },
+        chunking: { maxTokens: 500, overlap: 50 },
+        database: '~/.sift/sift.db',
+      };
+
+      await expect(saveConfig(invalidConfig)).rejects.toThrow('Invalid embedding base URL');
+    });
+
+    it('should reject invalid maxTokens', async () => {
+      const invalidConfig = {
+        folders: [],
+        embeddings: {
+          provider: 'ollama' as const,
+          model: 'test',
+          baseUrl: 'http://localhost:11434',
+        },
+        chunking: { maxTokens: 10, overlap: 5 }, // Too small
+        database: '~/.sift/sift.db',
+      };
+
+      await expect(saveConfig(invalidConfig)).rejects.toThrow('Invalid maxTokens');
+    });
+
+    it('should reject overlap >= maxTokens', async () => {
+      const invalidConfig = {
+        folders: [],
+        embeddings: {
+          provider: 'ollama' as const,
+          model: 'test',
+          baseUrl: 'http://localhost:11434',
+        },
+        chunking: { maxTokens: 500, overlap: 500 }, // Equal
+        database: '~/.sift/sift.db',
+      };
+
+      await expect(saveConfig(invalidConfig)).rejects.toThrow('Overlap must be less than maxTokens');
+    });
+  });
 });

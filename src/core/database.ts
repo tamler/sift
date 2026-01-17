@@ -14,10 +14,18 @@ export interface Document {
   indexedAt: string;
 }
 
+export interface DocumentWithScore extends Document {
+  score: number;
+}
+
 export interface DatabaseMetadata {
   key: string;
   value: string;
 }
+
+// Valid dimension range for embedding models (smallest known is 64, largest is 4096)
+const MIN_DIMENSION = 1;
+const MAX_DIMENSION = 8192;
 
 export class Database {
   private db: PGlite | null = null;
@@ -25,6 +33,18 @@ export class Database {
   private dimension: number;
 
   constructor(dbPath = '~/.sift/sift.db', dimension = 384) {
+    // Validate dimension to prevent SQL injection and invalid values
+    if (
+      typeof dimension !== 'number' ||
+      !Number.isInteger(dimension) ||
+      dimension < MIN_DIMENSION ||
+      dimension > MAX_DIMENSION
+    ) {
+      throw new Error(
+        `Invalid embedding dimension: ${dimension}. Must be an integer between ${MIN_DIMENSION} and ${MAX_DIMENSION}.`
+      );
+    }
+
     this.dbPath = expandPath(dbPath);
     this.dimension = dimension;
   }
@@ -117,17 +137,20 @@ export class Database {
     );
   }
 
-  async search(embedding: number[], limit = 10): Promise<Document[]> {
+  async search(embedding: number[], limit = 10): Promise<DocumentWithScore[]> {
     if (!this.db) throw new Error('Database not initialized');
 
-    const result = await this.db.query<Document>(
+    // Validate limit to prevent abuse
+    const safeLimit = Math.max(1, Math.min(limit, 1000));
+
+    const result = await this.db.query<DocumentWithScore>(
       `SELECT id, file_path as "filePath", chunk_index as "chunkIndex",
               content, indexed_at as "indexedAt",
               1 - (embedding <=> $1) as score
        FROM documents
        ORDER BY embedding <=> $1
        LIMIT $2`,
-      [JSON.stringify(embedding), limit]
+      [JSON.stringify(embedding), safeLimit]
     );
 
     return result.rows;

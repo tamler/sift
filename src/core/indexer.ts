@@ -1,7 +1,8 @@
 // Document Indexer
 // Parses PDF, DOCX, TXT, MD files and chunks them for embedding
 
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir, access } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import mammoth from 'mammoth';
@@ -29,6 +30,22 @@ export interface IndexResult {
 
 // Supported file extensions
 const SUPPORTED_EXTENSIONS = new Set(['.pdf', '.docx', '.txt', '.md']);
+
+// Validation constants
+const MIN_MAX_TOKENS = 50;
+const MAX_MAX_TOKENS = 10000;
+
+/**
+ * Check if a path exists and is accessible
+ */
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Rough token count estimation.
@@ -146,10 +163,23 @@ export class Indexer {
   private options: ChunkOptions;
 
   constructor(options: Partial<ChunkOptions> = {}) {
-    this.options = {
-      maxTokens: options.maxTokens ?? 500,
-      overlap: options.overlap ?? 50,
-    };
+    const maxTokens = options.maxTokens ?? 500;
+    const overlap = options.overlap ?? 50;
+
+    // Validate options
+    if (maxTokens < MIN_MAX_TOKENS || maxTokens > MAX_MAX_TOKENS) {
+      throw new Error(
+        `Invalid maxTokens: ${maxTokens}. Must be between ${MIN_MAX_TOKENS} and ${MAX_MAX_TOKENS}.`
+      );
+    }
+
+    if (overlap < 0 || overlap >= maxTokens) {
+      throw new Error(
+        `Invalid overlap: ${overlap}. Must be >= 0 and less than maxTokens.`
+      );
+    }
+
+    this.options = { maxTokens, overlap };
   }
 
   /**
@@ -216,6 +246,12 @@ export class Indexer {
    */
   async indexFolder(folderPath: string, recursive = true): Promise<Chunk[]> {
     const absolutePath = resolve(expandPath(folderPath));
+
+    // Validate folder exists and is accessible
+    if (!(await pathExists(absolutePath))) {
+      throw new Error(`Folder does not exist or is not accessible: ${absolutePath}`);
+    }
+
     const results: Chunk[] = [];
     const errors: string[] = [];
 
@@ -250,6 +286,12 @@ export class Indexer {
     recursive = true
   ): Promise<IndexResult[]> {
     const absolutePath = resolve(expandPath(folderPath));
+
+    // Validate folder exists and is accessible
+    if (!(await pathExists(absolutePath))) {
+      throw new Error(`Folder does not exist or is not accessible: ${absolutePath}`);
+    }
+
     const results: IndexResult[] = [];
 
     // Get all files in the folder
